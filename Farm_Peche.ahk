@@ -181,7 +181,7 @@ ErreurInattendue(e, mode) {
         Click "Up"
     enMarche := false, enCours := false
     try Etat("erreur")
-    try Info("Détails dans logs\journal.txt", 0)
+    try Info("Oups, j'ai buggé fréro… regarde logs\journal.txt", 0)
     return 1                           ; pas de fenêtre d'erreur, le script continue
 }
 
@@ -620,6 +620,21 @@ Glisser(x1, y1, x2, y2, quantite) {
     return true
 }
 
+; Clic droit sur une case. Sur une case du véhicule, le jeu met tout son contenu dans l'inventaire.
+ClicDroit(x, y) {
+    if SIMU
+        return SIMU.ClicDroit(x, y)
+    if !InventaireOuvert()
+        return false
+    BougerVers(x, y)
+    Geste(40)
+    if (!InventaireOuvert() || !JeuActif())
+        return false
+    Click "Right"
+    Attendre()
+    return true
+}
+
 ; Appuie sur une touche du jeu. Si tu es sur une autre fenêtre, on attend ton retour ;
 ; si le script a été arrêté entre-temps, on n'appuie pas.
 Touche(t) {
@@ -749,7 +764,7 @@ Geste(rapide) {
 Basculer(*) {
     global enMarche
     if (!enMarche && enCours) {
-        Info("Je finis l'action en cours…", 1500)
+        Info("Deux sec fréro, je finis mon truc", 1500)
         return
     }
     enMarche := !enMarche
@@ -1224,7 +1239,7 @@ AttacherAppat() {
         Touche("Tab")
         Sleep Random(700, 1000)
         if !InventaireOuvert() {
-            Info("Je ne vois pas l'inventaire après Tab")
+            Info("J'ai fait Tab mais je vois pas ton inventaire, il est où ?")
             Journal("Appât : inventaire pas vu après Tab")
             return
         }
@@ -1237,10 +1252,10 @@ AttacherAppat() {
         Geste(40)
         if InventaireOuvert()
             Click "Right"
-        Info("Appât attaché")
+        Info("Appât accroché, ça va mordre fréro")
         Sleep Random(500, 900)
     } else {
-        Info("Plus de " nom " dans l'inventaire", 4000)
+        Info("Y en a plus fréro : " nom ", va en racheter", 4000)
     }
     ; on referme (2 essais : si la barre de recherche garde la main, le 1er Tab peut ne
     ; pas fermer l'inventaire)
@@ -1332,7 +1347,7 @@ EstBarre(p) {
 ;  PARTIE FARM : menu, récolte, transfo, vente
 ; =============================================================================
 
-VERSION := "Macro v26"
+VERSION := "Macro v28"
 
 ; ---------- Quantités et poids ----------
 POIDS_OBJET := 0.2      ; kg par objet (récolté comme transformé)
@@ -1545,7 +1560,7 @@ AssurerCoffre() {
     static echecs := 0
     if CoffreOuvert()
         return true
-    Info("J'ouvre le coffre…", 1500)
+    Info("J'ouvre le coffre, bouge pas", 1500)
     if OuvrirCoffre() {
         echecs := 0
         return true
@@ -1553,9 +1568,9 @@ AssurerCoffre() {
     echecs += 1
     if (echecs >= 3) {
         echecs := 0
-        ArretFarm("Coffre inaccessible (véhicule verrouillé ou trop loin ?)")
+        ArretFarm("Coffre inaccessible fréro : t'as verrouillé le véhicule ou t'es trop loin ?")
     }
-    Info("Le coffre ne s'ouvre pas (verrouillé ?), je réessaie…", 3000)
+    Info("Il veut pas s'ouvrir ce coffre… verrouillé ? Je retente", 3000)
     Attendre(2500, 3500)
     return false
 }
@@ -1571,7 +1586,7 @@ ArretFarm(texte, fermer := true, toucheFin := "") {
     }
     if (toucheFin != "") {
         if InventaireOuvert() {
-            texte .= " (" toucheFin " pas appuyé : l'inventaire ne s'est pas fermé)"
+            texte .= " (mais j'ai pas appuyé sur " StrUpper(toucheFin) ", l'inventaire voulait pas se fermer)"
         } else {
             Sleep 400
             Touche(toucheFin)
@@ -1812,7 +1827,7 @@ CycleRecolte() {
         ; E seulement si on a vraiment récolté : lancé avec un véhicule déjà plein, E
         ; lancerait une action au lieu d'arrêter la récolte
         if VehiculePlein()
-            ArretFarm("Véhicule plein : récolte terminée", true, deposes ? TOUCHE_STOP_RECOLTE : "")
+            ArretFarm("Véhicule plein à craquer, récolte terminée. Propre fréro", true, deposes ? TOUCHE_STOP_RECOLTE : "")
         if !filtre {
             Rechercher("inv", BRUT)        ; une seule fois par ouverture du coffre
             filtre := true
@@ -1822,14 +1837,14 @@ CycleRecolte() {
             if DeposerPaquet(VEH_X, VEH_Y) {
                 deposes += 1, refus := 0
             } else if (RemplissageCamion() >= 0.95) {
-                ArretFarm("Véhicule plein (dépôt refusé) : récolte terminée", true, deposes ? TOUCHE_STOP_RECOLTE : "")
+                ArretFarm("Ça rentre plus, véhicule plein : récolte terminée", true, deposes ? TOUCHE_STOP_RECOLTE : "")
             } else if (++refus >= 3) {
                 SauverImage(Photo("logcoffre", EcX(0), EcY(220), EcX(2560), EcY(520)), "depot_refuse")
-                ArretFarm("3 dépôts refusés de suite : récolte arrêtée (regarde logs)")
+                ArretFarm("3 dépôts refusés d'affilée, j'abandonne fréro. Jette un œil aux logs")
             }
             continue
         }
-        Info("J'attends d'en avoir " PAQUET, 2000)
+        Info("Eh attends fréro, t'as pas " PAQUET, 2000)
         PauseJeu(1500, 2200)
     }
     enCours := false
@@ -1894,17 +1909,17 @@ CycleTransfo() {
                 echecs := 0, sature := false   ; le véhicule a de la place à nouveau
                 Journal("Transfo : " n " " BRUT " pris")
             } else if (n < 0 && fini && ++echecs >= 3) {
-                ArretFarm("Rien ne se transforme et je ne peux plus rien prendre (hors de la zone ? inventaire plein ?) : transfo arrêtée", false)
+                ArretFarm("Rien ne se transforme et je peux plus rien prendre. T'es sorti de la zone ou t'es blindé ? Transfo arrêtée", false)
             }
         }
         ; 4. plus rien à prendre dans le véhicule et tout est transformé : fin
         if (!brutVehicule && fini) {
             if (!FinTransfo() && ++attentesFin >= 3)
-                ArretFarm("Des " BRUT " restent dans ton inventaire sans se transformer : transfo arrêtée", false)
+                ArretFarm("Des " BRUT " traînent dans ton inventaire et veulent pas se transformer, j'arrête la transfo", false)
             dernierChangement := Horloge()
         }
         if !brutVehicule
-            Info("Plus rien à prendre, je laisse finir la transfo", 2000)
+            Info("Y a plus rien à prendre, on laisse mijoter fréro", 2000)
         PauseJeu(1800, 2400)
     }
     enCours := false
@@ -1936,8 +1951,8 @@ FinTransfo() {
     if Detecte("veh")
         return true
     if VehiculePlein()
-        ArretFarm("Transfo terminée : véhicule plein et verrouillé", true, TOUCHE_VERROU)
-    ArretFarm("Transfo terminée mais véhicule pas plein (" Round(Max(0, RemplissageCamion()) * 100) " %) : pas de verrouillage", false)
+        ArretFarm("Transfo terminée, véhicule plein et verrouillé. Bien joué fréro", true, TOUCHE_VERROU)
+    ArretFarm("Transfo finie mais le véhicule est pas plein (" Round(Max(0, RemplissageCamion()) * 100) " %), je ferme pas à clé", false)
 }
 
 ; Prend des objets à transformer : 200, ou moins si ton inventaire ne peut pas en porter
@@ -1957,8 +1972,9 @@ PrendreBrut() {
 ; ================= Vente =================
 ; Coffre ouvert (L si besoin), objets transformés recherchés des deux côtés. Le script lit
 ; ton poids sur la barre de l'inventaire et prend d'un coup ce qui rentre en gardant 2 kg
-; libres. Puis Tab (on ressort du coffre) et la suite des touches de vente. En boucle,
-; jusqu'à ce que le véhicule n'en ait plus.
+; libres (s'il en reste moins dans le véhicule, clic droit : tout le reste). Puis Tab (on
+; ressort du coffre) et la suite des touches de vente. En boucle, jusqu'à ce que le véhicule
+; n'en ait plus.
 
 CycleVente() {
     global enCours
@@ -1974,15 +1990,14 @@ CycleVente() {
         Attendre(300, 450)
         dejaLa := Detecte("inv")               ; objets transformés déjà dans l'inventaire
         if (!Detecte("veh") && !dejaLa)
-            ArretFarm("Plus de " PRODUIT " dans le véhicule : vente terminée")
+            ArretFarm("Plus de " PRODUIT " dans le véhicule, vente terminée. T'es riche fréro")
         q := PlaceInventaire()
-        pris := 0
+        pris := false
         if (q > 0 && Detecte("veh") && VerifierCase("veh", PRODUIT))
-            pris := Max(0, PrendreDuVehicule(PRODUIT, q))
-        Journal("Vente : " pris " " PRODUIT " pris (place pour " q ")")
-        if (pris = 0 && !dejaLa) {
+            pris := PrendreVente(q)
+        if (!pris && !dejaLa) {
             SauverImage(Photo("logcoffre", EcX(0), EcY(220), EcX(2560), EcY(520)), "vente_rien_pris")
-            ArretFarm("Rien pu prendre (place pour " q " d'après ton poids) : vérifie le poids max (menu 7). Vente arrêtée")
+            ArretFarm("Rien pu prendre (place pour " q " d'après ton poids). T'as mis le bon poids max dans le menu 7 ? Vente arrêtée")
         }
         ; on ressort du coffre (2 essais), puis E et la suite, seulement si c'est bien fermé
         Loop 2 {
@@ -1991,7 +2006,7 @@ CycleVente() {
             FermerInventaire()
         }
         if InventaireOuvert()
-            ArretFarm("Le coffre ne se referme pas : vente arrêtée avant d'appuyer sur E")
+            ArretFarm("Le coffre veut pas se refermer, j'appuie pas sur E. Vente arrêtée")
         Attendre(400, 600)
         for etape in VENTE_ETAPES {
             Touche(etape[1])
@@ -1999,6 +2014,25 @@ CycleVente() {
         }
     }
     enCours := false
+}
+
+; Prend q objets de la 1re case du véhicule. Si le jeu refuse, il en reste moins de q : un clic
+; droit sur la case prend tout le reste (il rentre forcément, q est la place qu'on a).
+; Renvoie true si quelque chose a été pris.
+PrendreVente(q) {
+    sig := SignatureQuantite("veh")
+    if !Glisser(VEH_X, VEH_Y, INV2_X, INV2_Y, q)
+        return false
+    if QuantiteABouge(sig, "veh") {
+        Journal("Vente : " q " " PRODUIT " pris")
+        return true
+    }
+    if (!ClicDroit(VEH_X, VEH_Y) || !QuantiteABouge(sig, "veh")) {
+        Journal("Vente : " q " refusé, et rien pris au clic droit")
+        return false
+    }
+    Journal("Vente : moins de " q " " PRODUIT " restants, tout le reste pris au clic droit")
+    return true
 }
 
 ; ================= Lecture de la quantité d'une case =================

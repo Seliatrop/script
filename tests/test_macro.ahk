@@ -154,7 +154,8 @@ Section("5. Vente (jeu simulé)")
 j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 66, zoneVente: true}), "vente")
 Egal(PremierePrise(j), 175, "66 kg sur 103 : prend 175 d'un coup")
 Egal(Debut(j, 7), "l,Tab,e,Enter,Tab,Enter,l", "L, prise, Tab (sortie du coffre), E et la suite, L...")
-Egal(Glisses(j, "veh"), "175,175,175,175!,128!,64,32!,16!,8,4!,2,1", "fin du stock (75) : tout est pris sans connaître le nombre")
+Egal(Glisses(j, "veh"), "175,175,175,175!", "fin du stock : 175 refusé (il en reste 75)")
+Egal(Joindre(j.clicsDroits), "75", "fin du stock : un seul clic droit prend les 75 qui restent")
 Egal(j.vendus, 600, "tout le véhicule est vendu")
 Verifier(j.poidsMaxVu <= 101, "inventaire jamais au-delà de 101 kg", j.poidsMaxVu " kg")
 Verifier(InStr(RAISON_ARRET, "vente terminée"), "arrêt : plus rien dans le véhicule", RAISON_ARRET)
@@ -163,6 +164,14 @@ PasDErreur(j)
 j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 46, inv: Map(PIER, 30), zoneVente: true}), "vente")
 Egal(PremierePrise(j), 245, "46 kg + 30 pierres déjà sur toi (52 kg) : prend 245, puis vend tout")
 Egal(j.vendus, 630, "les 30 déjà sur toi sont vendus aussi")
+PasDErreur(j)
+
+j := Lancer(JeuSimule({veh: Map(PIER, 60), invAutres: 40, zoneVente: true}), "vente")
+Egal(Glisses(j, "veh"), "305!", "60 pierres seulement : la prise de 305 est refusée")
+Egal(Joindre(j.clicsDroits), "60", "60 pierres seulement : le clic droit les prend toutes")
+Egal(j.vendus, 60, "60 pierres seulement : tout est vendu")
+Verifier(InStr(RAISON_ARRET, "vente terminée"), "60 pierres seulement : arrêt, vente terminée", RAISON_ARRET)
+PasDErreur(j)
 
 j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 102, zoneVente: true}), "vente")
 Verifier(InStr(RAISON_ARRET, "Rien pu prendre"), "inventaire déjà plein : arrêt avec un message", RAISON_ARRET)
@@ -197,7 +206,7 @@ class JeuSimule {
         this.rechInv := "", this.rechVeh := ""
         this.recolte := 0, this.transfo := 0      ; objets par lot (0 = pas de récolte / hors zone)
         this.zoneVente := false, this.entrees := 0, this.vendus := 0
-        this.touches := [], this.glisses := [], this.erreurs := []
+        this.touches := [], this.glisses := [], this.erreurs := [], this.clicsDroits := []
         this.refusesDePlus := 0
         for k, v in o.OwnProps()
             this.%k% := v
@@ -290,6 +299,28 @@ class JeuSimule {
             this.poidsMaxVu := Max(this.poidsMaxVu, this.Poids("inv"))
         } else if (de = "inv" && q = PAQUET) {
             this.refusesDePlus += 1
+        }
+        return true
+    }
+
+    ; clic droit sur la 1re case du véhicule : tout son contenu passe dans l'inventaire
+    ; (refusé si c'est trop lourd). On note la quantité prise, "!" si refusé.
+    ClicDroit(x, y) {
+        if !this.InventaireOuvert() {
+            this.erreurs.Push("clic droit avec l'inventaire fermé")
+            return false
+        }
+        c := this.Cases("veh")
+        if (!this.CoffreOuvert() || x != VEH_X || y != VEH_Y || !c.Length) {
+            this.erreurs.Push("clic droit inattendu " x "," y)
+            return true
+        }
+        ok := (this.Poids("inv") + c[1].q * 0.2 <= this.invMax + 0.001)
+        this.clicsDroits.Push(c[1].q (ok ? "" : "!"))
+        if ok {
+            this.Ajouter("inv", c[1].nom, c[1].q)
+            this.Ajouter("veh", c[1].nom, -c[1].q)
+            this.poidsMaxVu := Max(this.poidsMaxVu, this.Poids("inv"))
         }
         return true
     }
