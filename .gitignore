@@ -1,0 +1,6 @@
+# créés par le script à l'exécution
+reglages.ini
+logs/
+tests/resultats.txt
+tests/reglages.ini
+tests/logs/
