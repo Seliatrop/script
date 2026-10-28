@@ -180,8 +180,8 @@ ErreurInattendue(e, mode) {
     if GetKeyState("LButton")
         Click "Up"
     enMarche := false, enCours := false
-    try Etat("Erreur : script en pause (9 pour relancer)")
-    try Info("Erreur notée dans logs\journal.txt", 0)
+    try Etat("erreur")
+    try Info("Détails dans logs\journal.txt", 0)
     return 1                           ; pas de fenêtre d'erreur, le script continue
 }
 
@@ -204,44 +204,130 @@ EcrireReglage(cle, valeur) {
 
 ; =============================================================================
 ;  Panneau d'état (en haut à droite, ne prend pas les clics)
+;  Verre fumé : fond sombre translucide, coins arrondis (Windows ne floute pas le fond
+;  d'une fenêtre qui n'a jamais le focus). Le rond et le mot en haut à droite donnent
+;  l'état : vert en cours, orange en attente (tu n'es pas sur FiveM), gris en pause,
+;  bleu arrêté (la raison est écrite en bas), rouge erreur.
 ; =============================================================================
 
-PANNEAU := 0, PAN_ETAT := 0, PAN_MSG := 0, PAN_STATS := 0
+ETATS := Map(
+    "marche",  {mot: "En cours",   coul: "3DDC84"},
+    "attente", {mot: "En attente", coul: "FFB547"},
+    "pause",   {mot: "En pause",   coul: "8B93A1"},
+    "arret",   {mot: "Arrêté",     coul: "6CB4FF"},
+    "erreur",  {mot: "Erreur",     coul: "FF6B6B"}
+)
+PANNEAU := 0, PAN := 0
+PAN_ETAT := "", PAN_MESSAGE := ""        ; rien d'affiché avant que les réglages soient lus
 if !MODE_TEST
     CreerPanneau()
 
 CreerPanneau() {
-    global PANNEAU, PAN_ETAT, PAN_MSG, PAN_STATS
+    global PANNEAU, PAN
     g := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 -DPIScale")
-    g.BackColor := "141414"
-    g.MarginX := 10, g.MarginY := 6
-    g.SetFont("s9 bold cF0F0F0", "Segoe UI")
-    PAN_ETAT := g.Add("Text", "x10 y6 w300", "")
-    g.SetFont("s9 norm cD8D8D8", "Segoe UI")
-    PAN_MSG := g.Add("Text", "x10 y+2 w300", "")
-    g.SetFont("s8 norm cA8A8A8", "Segoe UI")
-    PAN_STATS := g.Add("Text", "x10 y+2 w300", "")
-    g.Show("NoActivate x" (A_ScreenWidth - 330) " y30 w320 h64")
-    try WinSetTransparent 215, g
+    g.BackColor := "15171C"
+    g.MarginX := 0, g.MarginY := 0
+    PAN := {}
+    g.SetFont("s14", "Segoe UI")
+    PAN.rond := g.Add("Text", "x14 y6 w18", "●")
+    g.SetFont("s11 w600 cFFFFFF", "Segoe UI")
+    PAN.titre := g.Add("Text", "x34 y10 w160", "")
+    g.SetFont("s8 bold", "Segoe UI")
+    PAN.etat := g.Add("Text", "x196 y14 w108 Right", "")
+    g.SetFont("s9 norm c8B93A1", "Segoe UI")
+    PAN.detail := g.Add("Text", "x34 y32 w270", "")
+    g.SetFont("s10 norm cE6EAF0", "Segoe UI")
+    PAN.stats := g.Add("Text", "x16 w288", "")
+    g.SetFont("s9 norm", "Segoe UI")
+    PAN.msg := g.Add("Text", "x16 w288", "")
+    g.Show("NoActivate x" (A_ScreenWidth - 330) " y30 w320 h60")
+    try WinSetTransparent 225, g
+    ; coins arrondis et liseré clair (Windows 11, sans effet ailleurs)
+    for attr, val in Map(33, 2, 34, 0x4A433E) {
+        b := Buffer(4), NumPut("UInt", val, b)
+        DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", g.Hwnd, "UInt", attr, "Ptr", b, "UInt", 4)
+    }
     PANNEAU := g
+    SetTimer SurveillerJeu, 300
 }
 
-Etat(texte) {
-    try PAN_ETAT.Value := texte
+; etat : "marche", "pause", "arret" ou "erreur" ("attente" s'affiche tout seul)
+Etat(etat) {
+    global PAN_ETAT := etat
+    MajPanneau()
 }
 
 Info(texte, duree := 2500) {
-    try PAN_MSG.Value := texte
-    if (duree > 0)
-        SetTimer EffacerInfo, -duree
+    global PAN_MESSAGE := texte
+    ; un message permanent ne doit pas être effacé par la minuterie d'un message précédent
+    SetTimer EffacerInfo, (duree > 0) ? -duree : 0
+    MajPanneau()
 }
 
 EffacerInfo() {
-    try PAN_MSG.Value := ""
+    global PAN_MESSAGE := ""
+    MajPanneau()
 }
 
 Compteurs(texte) {
-    try PAN_STATS.Value := texte
+    if PANNEAU
+        Afficher(PAN.stats, texte), MajPanneau()
+}
+
+EtatAffiche() => (PAN_ETAT = "marche" && !JeuActif()) ? "attente" : PAN_ETAT
+
+; Passe en « En attente » dès que tu quittes FiveM pendant que le script tourne
+SurveillerJeu() {
+    static vu := ""
+    if (EtatAffiche() != vu)
+        vu := EtatAffiche(), MajPanneau()
+}
+
+MajPanneau() {
+    static coulEtat := "", coulMsg := ""          ; couleurs déjà en place (rien à refaire)
+    if (!PANNEAU || PAN_ETAT = "")
+        return
+    e := ETATS[EtatAffiche()], r := Resume()
+    if (e.coul != coulEtat)
+        coulEtat := e.coul, PAN.rond.SetFont("c" e.coul), PAN.etat.SetFont("c" e.coul)
+    Afficher(PAN.etat, e.mot), Afficher(PAN.titre, r.titre), Afficher(PAN.detail, r.detail)
+    ; en bas : le message, ou les touches utiles quand rien ne tourne
+    msg := PAN_MESSAGE
+    if (msg = "" && PAN_ETAT != "marche")
+        msg := "9 pour lancer   ·   7 pour le menu"
+    c := (PAN_MESSAGE = "") ? "c7D8594" : "cD0D6E0"
+    if (c != coulMsg)
+        coulMsg := c, PAN.msg.SetFont(c)
+    Afficher(PAN.msg, msg)
+    ; les lignes vides disparaissent, les messages longs passent sur plusieurs lignes
+    PAN.detail.GetPos(, &y, , &h)
+    y += h + 10
+    for ctl in [PAN.stats, PAN.msg] {
+        ctl.Visible := (ctl.Value != "")
+        if !ctl.Visible
+            continue
+        h := HauteurTexte(ctl)
+        ctl.Move(, y, , h)
+        y += h + 4
+    }
+    PANNEAU.Move(, , , y + 8)
+}
+
+Afficher(ctl, texte) {
+    if (ctl.Value != texte)
+        ctl.Value := texte
+}
+
+; Hauteur (px) du texte d'un contrôle, retours à la ligne compris
+HauteurTexte(ctl) {
+    ctl.GetPos(, , &w)
+    hdc := DllCall("GetDC", "Ptr", ctl.Hwnd, "Ptr")
+    ancien := DllCall("SelectObject", "Ptr", hdc, "Ptr", SendMessage(0x31, 0, 0, ctl), "Ptr")   ; WM_GETFONT
+    rect := Buffer(16, 0), NumPut("Int", w, rect, 8)
+    DllCall("DrawText", "Ptr", hdc, "Str", ctl.Value, "Int", -1, "Ptr", rect, "UInt", 0x410)   ; CALCRECT | WORDBREAK
+    DllCall("SelectObject", "Ptr", hdc, "Ptr", ancien)
+    DllCall("ReleaseDC", "Ptr", ctl.Hwnd, "Ptr", hdc)
+    return NumGet(rect, 12, "Int")
 }
 
 ; =============================================================================
@@ -572,10 +658,8 @@ Attendre(mini := 0, maxi := 0) {
     if (enMarche && !JeuActif()) {
         if GetKeyState("LButton")
             Click "Up"
-        Info("Pause : reviens sur FiveM", 0)
         while (enMarche && !JeuActif())
             Sleep 200
-        Info("")
     }
     if !enMarche {
         if GetKeyState("LButton")
@@ -653,16 +737,16 @@ Geste(rapide) {
 Basculer(*) {
     global enMarche
     if (!enMarche && enCours) {
-        Info("Une seconde, je termine l'action en cours...", 1500)
+        Info("Je finis l'action en cours…", 1500)
         return
     }
     enMarche := !enMarche
     if enMarche {
         STATS.debut := A_TickCount
-        Etat(Resume() " : en cours")
+        Etat("marche")
         LancerCycle()
     } else {
-        Etat(Resume() " : en pause (9 pour lancer)")
+        Etat("pause")
     }
 }
 
@@ -674,22 +758,15 @@ CyclePeche() {
     global enCours
     enCours := true
     lettre := "", lettreVue := ""
-    horsJeu := false
     debutCercle := 0
     prochaineVerif := A_TickCount + 500
     MajCompteursPeche()
     while enMarche {
-        if !JeuActif() {
-            if !horsJeu
-                Info("Pause : FiveM n'est pas au premier plan", 0)
-            horsJeu := true
+        if !JeuActif() {               ; le panneau affiche « En attente »
             lettre := "", lettreVue := ""
             Sleep 200
             continue
         }
-        if horsJeu
-            Info("")
-        horsJeu := false
 
         r := AnalyserQTE()
         if !r {
@@ -742,7 +819,7 @@ CyclePeche() {
 }
 
 MajCompteursPeche() {
-    Compteurs("QTE : " STATS.appuis " appuis, " STATS.sansAppui " ratés  |  latence " Round(LATENCE_JEU) " ms")
+    Compteurs("QTE " STATS.appuis "   ·   ratés " STATS.sansAppui "   ·   latence " Round(LATENCE_JEU) " ms")
 }
 
 ; Suit le trait et appuie au bon moment. Sa vitesse est mesurée en moyenne depuis le début
@@ -1244,7 +1321,7 @@ EstBarre(p) {
 ;  PARTIE FARM : menu, récolte, transfo, vente
 ; =============================================================================
 
-VERSION := "Macro v24"
+VERSION := "Macro v25"
 
 ; ---------- Quantités et poids ----------
 POIDS_OBJET := 0.2      ; kg par objet (récolté comme transformé)
@@ -1284,18 +1361,17 @@ if !MODE_TEST {
     Hotkey "NumpadHome", OuvrirMenu
     Hotkey "Numpad9",    Basculer
     Hotkey "NumpadPgUp", Basculer
-    Etat(Resume() " : en pause (9 pour lancer)")
+    Etat("pause")
     if (LireReglage("dejaLance", 0) = 0)
         OuvrirMenu()
-    else
-        Info("Réglages repris. 7 = menu, 9 = lancer", 4000)
 }
 
+; Titre et ligne de détail du panneau
 Resume() {
     if (activite = "peche")
-        return "Pêche (" eau (appatAuto ? ", appât auto" : "") ")"
-    return Map("recolte", "Récolte ", "transfo", "Transfo ", "vente", "Vente ")[modeActuel]
-        . (modeActuel = "recolte" ? BRUT : PRODUIT)
+        return {titre: "Pêche", detail: eau (appatAuto ? "   ·   appât auto" : "")}
+    return {titre: Map("recolte", "Récolte", "transfo", "Transfo", "vente", "Vente")[modeActuel]
+        , detail: (modeActuel = "recolte") ? BRUT : PRODUIT}
 }
 
 LancerCycle() {
@@ -1314,7 +1390,7 @@ LancerCycle() {
 OuvrirMenu(*) {
     global enMarche
     enMarche := false
-    Etat(Resume() " : en pause (9 pour lancer)")
+    Etat("pause")
 
     g := Gui("+AlwaysOnTop -MinimizeBox", VERSION)
     g.SetFont("s10", "Segoe UI")
@@ -1382,12 +1458,11 @@ OuvrirMenu(*) {
                 , "brut", BRUT, "produit", PRODUIT, "poidsMax", POIDS_MAX, "rythme", RYTHME, "dejaLance", 1)
             EcrireReglage(cle, val)
         g.Destroy()
-        Etat(Resume() " : en pause (9 pour lancer)")
+        Etat("pause")
         if (activite = "peche")
             MajCompteursPeche()
         else
             MajCompteursFarm()
-        Info("9 pour lancer")
     }
     Calib(*) {
         g.Destroy()
@@ -1406,9 +1481,9 @@ OuvrirMenu(*) {
 MajCompteursFarm() {
     heures := (A_TickCount - STATS.debut) / 3600000
     if (modeActuel = "vente")
-        Compteurs("Vendus : " STATS.ventes "  |  inventaire " POIDS_MAX " kg max")
+        Compteurs("Vendus " STATS.ventes "   ·   inventaire " POIDS_MAX " kg max")
     else
-        Compteurs("Déposés : " STATS.envoyes (heures > 0.02 ? " (" Round(STATS.envoyes / heures) "/h)" : ""))
+        Compteurs("Déposés " STATS.envoyes (heures > 0.02 ? "   ·   " Round(STATS.envoyes / heures) " / h" : ""))
 }
 
 ; ================= Coffre, arrêts, petites aides =================
@@ -1465,7 +1540,7 @@ AssurerCoffre() {
     static echecs := 0
     if CoffreOuvert()
         return true
-    Info("J'ouvre le coffre...", 1500)
+    Info("J'ouvre le coffre…", 1500)
     if OuvrirCoffre() {
         echecs := 0
         return true
@@ -1473,9 +1548,9 @@ AssurerCoffre() {
     echecs += 1
     if (echecs >= 3) {
         echecs := 0
-        ArretFarm("Coffre inaccessible (véhicule verrouillé ou trop loin ?). 9 pour relancer")
+        ArretFarm("Coffre inaccessible (véhicule verrouillé ou trop loin ?)")
     }
-    Info("Le coffre ne s'ouvre pas (véhicule verrouillé ?), je réessaie...", 3000)
+    Info("Le coffre ne s'ouvre pas (verrouillé ?), je réessaie…", 3000)
     Attendre(2500, 3500)
     return false
 }
@@ -1501,7 +1576,7 @@ ArretFarm(texte, fermer := true, toucheFin := "") {
     RAISON_ARRET := texte
     enMarche := false
     enCours := false
-    Etat(Resume() " : arrêté")
+    Etat("arret")
     Info(texte, 0)
     Exit
 }
@@ -1699,17 +1774,14 @@ PauseJeu(mini, maxi) {
 ; Heure en ms (celle du jeu simulé pendant les tests)
 Horloge() => SIMU ? SIMU.t : A_TickCount
 
-; Tu n'es pas sur FiveM : le script ne fait rien et attend ton retour.
-; Renvoie true s'il a dû attendre (pour remettre les compteurs d'attente à zéro).
+; Tu n'es pas sur FiveM : le script ne fait rien et attend ton retour (le panneau affiche
+; « En attente »). Renvoie true s'il a dû attendre (pour remettre les compteurs d'attente à zéro).
 AttendreRetourJeu() {
     global enCours
     if JeuActif()
         return false
-    while (enMarche && !JeuActif()) {
-        Info("En pause : reviens sur FiveM pour que je continue", 0)
+    while (enMarche && !JeuActif())
         Sleep 300
-    }
-    Info("")
     if !enMarche {
         enCours := false
         Exit
@@ -1738,7 +1810,7 @@ CycleRecolte() {
         ; E seulement si on a vraiment récolté : lancé avec un véhicule déjà plein, E
         ; lancerait une action au lieu d'arrêter la récolte
         if VehiculePlein()
-            ArretFarm("Véhicule plein : récolte terminée. 9 pour relancer", true, deposes ? TOUCHE_STOP_RECOLTE : "")
+            ArretFarm("Véhicule plein : récolte terminée", true, deposes ? TOUCHE_STOP_RECOLTE : "")
         if !filtre {
             Rechercher("inv", BRUT)        ; une seule fois par ouverture du coffre
             filtre := true
@@ -1748,14 +1820,14 @@ CycleRecolte() {
             if DeposerPaquet(VEH_X, VEH_Y) {
                 deposes += 1, refus := 0
             } else if (RemplissageCamion() >= 0.95) {
-                ArretFarm("Véhicule plein (dépôt refusé) : récolte terminée. 9 pour relancer", true, deposes ? TOUCHE_STOP_RECOLTE : "")
+                ArretFarm("Véhicule plein (dépôt refusé) : récolte terminée", true, deposes ? TOUCHE_STOP_RECOLTE : "")
             } else if (++refus >= 3) {
                 SauverImage(Photo("logcoffre", EcX(0), EcY(220), EcX(2560), EcY(520)), "depot_refuse")
                 ArretFarm("3 dépôts refusés de suite : récolte arrêtée (regarde logs)")
             }
             continue
         }
-        Info("Récolte : j'attends d'avoir " PAQUET " " BRUT, 2000)
+        Info("J'attends d'en avoir " PAQUET, 2000)
         PauseJeu(1500, 2200)
     }
     enCours := false
@@ -1831,7 +1903,8 @@ CycleTransfo() {
             dernierChangement := Horloge()
         }
         MajCompteursFarm()
-        Info(brutVehicule ? "Transfo en cours" : "Plus rien à prendre : je laisse finir la transfo", 2000)
+        if !brutVehicule
+            Info("Plus rien à prendre, je laisse finir la transfo", 2000)
         PauseJeu(1800, 2400)
     }
     enCours := false
@@ -1865,7 +1938,7 @@ FinTransfo() {
     if Detecte("veh")
         return true
     if VehiculePlein()
-        ArretFarm("Transfo terminée : véhicule plein et verrouillé. 9 pour relancer", true, TOUCHE_VERROU)
+        ArretFarm("Transfo terminée : véhicule plein et verrouillé", true, TOUCHE_VERROU)
     ArretFarm("Transfo terminée mais véhicule pas plein (" Round(Max(0, RemplissageCamion()) * 100) " %) : pas de verrouillage", false)
 }
 

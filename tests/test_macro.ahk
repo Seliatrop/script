@@ -1,6 +1,6 @@
 #Requires AutoHotkey v2.0
 ; =============================================================================
-;  TESTS de macro_fivem.ahk (double-clic pour lancer, ça prend environ une minute)
+;  TESTS de Farm_Peche.ahk (double-clic pour lancer, ça prend environ une minute)
 ;  Rien n'est envoyé au jeu : pas une touche, pas un clic. On teste :
 ;   1. les calculs (place qui reste dans l'inventaire)
 ;   2. la lecture de l'écran sur une vraie capture (coffre_transfo.png, coffre ouvert)
@@ -11,7 +11,7 @@
 ; =============================================================================
 
 MODE_TEST := true
-#Include %A_ScriptDir%\..\macro_fivem.ahk
+#Include %A_ScriptDir%\..\Farm_Peche.ahk
 
 LOGS_ACTIFS := false
 FICHIER_RESULTATS := A_ScriptDir "\resultats.txt"
