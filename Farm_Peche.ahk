@@ -2,7 +2,7 @@
 #SingleInstance Force
 ; =============================================================================
 ;  MACRO FARM + PECHE
-;  Pavé numérique :  7 = menu   9 = lancer / arrêter
+;  Pavé numérique :  7 = menu   8 = cacher / montrer le panneau   9 = lancer / arrêter
 ;  Pour fermer : clic droit sur l'icône H verte, "Exit".
 ;  Le jeu doit être en "fenêtré sans bordure".
 ;
@@ -160,7 +160,7 @@ SIMU       := 0          ; tests seulement : un jeu simulé à la place de FiveM
 MODE_TEST  := IsSet(MODE_TEST) && MODE_TEST   ; true quand le script est inclus par les tests
 LATENCE_JEU := Number(IniRead(FICHIER_INI, "reglages", "latence", LATENCE_DEPART))
 MESURES_LATENCE := []
-STATS := {appuis: 0, sansAppui: 0, envoyes: 0, ventes: 0, debut: A_TickCount}
+STATS := {appuis: 0, sansAppui: 0}      ; compteurs de la pêche
 RYTHME := Integer(IniRead(FICHIER_INI, "reglages", "rythme", 2))
 if !RYTHMES.Has(RYTHME)
     RYTHME := 2
@@ -272,6 +272,18 @@ EffacerInfo() {
 Compteurs(texte) {
     if PANNEAU
         Afficher(PAN.stats, texte), MajPanneau()
+}
+
+; Touche 8 : cache le panneau ou le réaffiche
+BasculerPanneau(*) {
+    static cache := false
+    if !PANNEAU
+        return
+    cache := !cache
+    if cache
+        PANNEAU.Hide()
+    else
+        PANNEAU.Show("NoActivate")
 }
 
 EtatAffiche() => (PAN_ETAT = "marche" && !JeuActif()) ? "attente" : PAN_ETAT
@@ -742,7 +754,6 @@ Basculer(*) {
     }
     enMarche := !enMarche
     if enMarche {
-        STATS.debut := A_TickCount
         Etat("marche")
         LancerCycle()
     } else {
@@ -1321,7 +1332,7 @@ EstBarre(p) {
 ;  PARTIE FARM : menu, récolte, transfo, vente
 ; =============================================================================
 
-VERSION := "Macro v25"
+VERSION := "Macro v26"
 
 ; ---------- Quantités et poids ----------
 POIDS_OBJET := 0.2      ; kg par objet (récolté comme transformé)
@@ -1361,6 +1372,8 @@ if !MODE_TEST {
     Hotkey "NumpadHome", OuvrirMenu
     Hotkey "Numpad9",    Basculer
     Hotkey "NumpadPgUp", Basculer
+    Hotkey "Numpad8",    BasculerPanneau
+    Hotkey "NumpadUp",   BasculerPanneau
     Etat("pause")
     if (LireReglage("dejaLance", 0) = 0)
         OuvrirMenu()
@@ -1462,7 +1475,7 @@ OuvrirMenu(*) {
         if (activite = "peche")
             MajCompteursPeche()
         else
-            MajCompteursFarm()
+            Compteurs("")                  ; pas de compteurs pour le farm
     }
     Calib(*) {
         g.Destroy()
@@ -1476,14 +1489,6 @@ OuvrirMenu(*) {
     btnCal.OnEvent("Click", Calib)
     MajMenu()
     g.Show("w312 h482")
-}
-
-MajCompteursFarm() {
-    heures := (A_TickCount - STATS.debut) / 3600000
-    if (modeActuel = "vente")
-        Compteurs("Vendus " STATS.ventes "   ·   inventaire " POIDS_MAX " kg max")
-    else
-        Compteurs("Déposés " STATS.envoyes (heures > 0.02 ? "   ·   " Round(STATS.envoyes / heures) " / h" : ""))
 }
 
 ; ================= Coffre, arrêts, petites aides =================
@@ -1636,8 +1641,6 @@ DeposerPaquet(cibleX, cibleY) {
         Journal("Dépôt de " PAQUET " refusé, véhicule à " Round(Max(0, RemplissageCamion()) * 100, 1) " %")
         return false
     }
-    STATS.envoyes += PAQUET
-    MajCompteursFarm()
     return true
 }
 
@@ -1800,7 +1803,6 @@ CycleRecolte() {
     enCours := true
     filtre := false                    ; recherche tapée depuis l'ouverture du coffre ?
     deposes := 0, refus := 0
-    MajCompteursFarm()
     while enMarche {
         AttendreRetourJeu()
         if !CoffreOuvert()
@@ -1844,7 +1846,6 @@ CycleRecolte() {
 CycleTransfo() {
     global enCours
     enCours := true
-    MajCompteursFarm()
     filtre := false                            ; recherches tapées depuis l'ouverture du coffre ?
     premiere := true                           ; au lancement, on prend tout de suite
     sigAvant := -1, dernierChangement := Horloge()
@@ -1902,7 +1903,6 @@ CycleTransfo() {
                 ArretFarm("Des " BRUT " restent dans ton inventaire sans se transformer : transfo arrêtée", false)
             dernierChangement := Horloge()
         }
-        MajCompteursFarm()
         if !brutVehicule
             Info("Plus rien à prendre, je laisse finir la transfo", 2000)
         PauseJeu(1800, 2400)
@@ -1928,8 +1928,6 @@ FinTransfo() {
     ; même si la barre paraît pleine : à 99,5 %, il peut manquer une vingtaine d'objets
     if (Detecte("inv") && VerifierCase("inv", PRODUIT)) {
         n := ViderCase("inv", PRODUIT, PAQUET - 1, VEH2_X, VEH2_Y)
-        if (n > 0)
-            STATS.envoyes += n
         Journal("Fin de transfo : " n " " PRODUIT " déposés")
     }
     ; recherche retapée : une case vide doit vraiment vouloir dire "plus rien à transformer"
@@ -1965,7 +1963,6 @@ PrendreBrut() {
 CycleVente() {
     global enCours
     enCours := true
-    MajCompteursFarm()
     while enMarche {
         AttendreRetourJeu()
         if !AssurerCoffre()
@@ -2000,8 +1997,6 @@ CycleVente() {
             Touche(etape[1])
             Attendre(etape[2], etape[2] + 150)
         }
-        STATS.ventes += pris
-        MajCompteursFarm()
     }
     enCours := false
 }
