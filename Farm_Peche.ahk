@@ -14,13 +14,14 @@
 ;  RECOLTE : ouvre le coffre (L) si besoin, cherche l'objet récolté dans ton inventaire et,
 ;            dès qu'il y en a 100, les met dans le véhicule. En boucle jusqu'à ce que le
 ;            véhicule soit plein (1000/1000, 2000/2000...) : Tab, E, pause.
-;  TRANSFO : objets transformés cherchés à gauche, objets à transformer à droite. Prend 200
-;            (moins si ton poids ne le permet pas) ; dès que 100 sont transformés, il les
-;            remet et en reprend 200. Fin quand le véhicule est plein ET n'a plus aucun
-;            objet à transformer : Tab, U (verrouille le véhicule), pause.
-;  VENTE   : prend d'un coup ce que ton inventaire peut porter en gardant 2 kg libres
-;            (66 kg sur 103 : (103 - 66 - 2) / 0,2 = 175), ressort du coffre (Tab), puis E
-;            et la suite de la vente. Le poids max de ton inventaire se règle dans le menu.
+;  TRANSFO : objets transformés cherchés à gauche, objets à transformer à droite. Prend 200 ;
+;            dès que 100 sont transformés, il les remet et retente 200 (si t'es trop lourd, le
+;            jeu refuse et il retente au dépôt suivant). Fin quand le véhicule est plein ET n'a
+;            plus aucun objet à transformer : Tab, U (verrouille le véhicule), pause.
+;  VENTE   : prend d'un coup ce que ton inventaire peut porter en gardant 1 kg libre
+;            (66 kg sur 103 : (103 - 66 - 1) / 0,2 = 180). Si ce qui reste dans le véhicule
+;            pèse moins, clic droit : tout le reste. Ressort du coffre (Tab), puis E et la suite
+;            de la vente. Les poids max (inventaire, véhicule) se règlent dans le menu.
 ;  PECHE   : fait les QTE tout seul, et attache l'appât si tu coches la case.
 ;
 ;  Le script crée à côté de lui reglages.ini (tes choix, la latence de ton PC)
@@ -67,9 +68,6 @@ RYTHMES := Map(
     2, {nom: "Naturel",    pause: [250, 450],  souris: 0.8, frappe: [45, 110], souffle: 18},
     3, {nom: "Tranquille", pause: [450, 800],  souris: 1.3, frappe: [80, 170], souffle: 10}
 )
-
-; Façon de placer la souris. Si le curseur saute ou si le glissé ne prend pas, essaie 2 puis 3.
-METHODE_SOURIS := 1
 
 ; ---------- Logs ----------
 LOGS_ACTIFS := true
@@ -481,6 +479,20 @@ CompterClairs(c, seuil := 190, ecart := 70) {
     return n
 }
 
+; Compte les pixels sombres (le fond d'une case occupée)
+CompterSombres(c, seuil) {
+    n := 0
+    Loop c.h {
+        y := A_Index - 1
+        Loop c.w {
+            p := c.Pixel(A_Index - 1, y)
+            if (Max((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF) < seuil)
+                n += 1
+        }
+    }
+    return n
+}
+
 EstRouge(p) {
     r := (p >> 16) & 0xFF, g := (p >> 8) & 0xFF, b := p & 0xFF
     return r >= 150 && r - g >= 45 && r - b >= 45
@@ -536,12 +548,16 @@ ZoneNom(cote, colonne := 1) {
     return [EcX(x), EcY(474), EcX(x + 140), EcY(496)]
 }
 
-; Y a-t-il un objet (un nom écrit) dans cette case ?
+; Y a-t-il un objet dans cette case ? Il faut un nom écrit en clair ET le fond sombre de la
+; case autour (au moins 30 %). Une case vide est transparente : un décor clair derrière (mur,
+; sable) donne des pixels clairs mais pas de fond sombre (0 à 10 % sur tes captures, contre 53
+; à 83 % pour une case occupée).
 Detecte(cote, colonne := 1) {
     if SIMU
         return SIMU.Detecte(cote, colonne)
     z := ZoneNom(cote, colonne)
-    return CompterClairs(Photo("nom", z[1], z[2], z[3], z[4]), 170, 70) >= 15
+    c := Photo("nom", z[1], z[2], z[3], z[4])
+    return CompterClairs(c, 170, 70) >= 15 && CompterSombres(c, 75) >= c.w * c.h * 0.3
 }
 
 ; Tape le nom dans la barre de recherche : l'objet passe en 1re case
@@ -569,20 +585,21 @@ Rechercher(cote, nom) {
 }
 
 ; Vérifie que la recherche est bien en place avant de glisser : la 1re case contient un
-; objet et, si le nom ne correspond qu'à un seul objet (unique), la 2e case est vide.
+; objet et la 2e est vide (le nom cherché ne correspond qu'à un seul objet).
 ; Si ce n'est pas le cas, on refait la recherche, mais au plus une fois toutes les 15 s
 ; (pour ne jamais taper en boucle dans la barre de recherche).
-VerifierCase(cote, nom, unique := true) {
+VerifierCase(cote, nom) {
     static derniere := Map()
-    if CaseOk(cote, unique)
+    if CaseOk(cote)
         return true
-    cle := cote "|" nom
-    if (derniere.Has(cle) && A_TickCount - derniere[cle] < 15000)
+    cle := cote "|" nom, t := Horloge()
+    ; (t < derniere : le temps du faux jeu repart de zéro à chaque scénario de test)
+    if (derniere.Has(cle) && t >= derniere[cle] && t - derniere[cle] < 15000)
         return false
-    derniere[cle] := A_TickCount
+    derniere[cle] := t
     Rechercher(cote, nom)
-    Sleep 300
-    if CaseOk(cote, unique)
+    Dormir(300)
+    if CaseOk(cote)
         return true
     xc := (cote = "inv") ? 60 : 1650
     SauverImage(Photo("logcase", EcX(xc), EcY(335), EcX(xc + 340), EcY(500)), "case_" cote)
@@ -590,7 +607,7 @@ VerifierCase(cote, nom, unique := true) {
     return false
 }
 
-CaseOk(cote, unique) => Detecte(cote, 1) && (!unique || !Detecte(cote, 2))
+CaseOk(cote) => Detecte(cote, 1) && !Detecte(cote, 2)
 
 ; Glisse la 1re case d'un côté vers l'autre et tape la quantité
 Glisser(x1, y1, x2, y2, quantite) {
@@ -648,6 +665,10 @@ Touche(t) {
     Sleep Random(50, 90)
     Send "{" t " up}"
 }
+
+; Petite pause fixe, le temps que l'écran du jeu se mette à jour (dans les tests, c'est le temps
+; du faux jeu qui avance)
+Dormir(ms) => SIMU ? SIMU.Avancer(ms) : Sleep(ms)
 
 ; Pause du rythme choisi, qu'on n'interrompt pas (milieu d'un geste)
 PauseGeste() {
@@ -727,17 +748,7 @@ BougerVers(x, y) {
     PlacerSouris(x, y)
 }
 
-PlacerSouris(x, y) {
-    if (METHODE_SOURIS = 1) {
-        DllCall("SetCursorPos", "Int", x, "Int", y)
-    } else if (METHODE_SOURIS = 2) {
-        MouseGetPos &ax, &ay
-        if (x != ax || y != ay)
-            MouseMove x - ax, y - ay, 0, "R"
-    } else {
-        MouseMove x, y, 0
-    }
-}
+PlacerSouris(x, y) => DllCall("SetCursorPos", "Int", x, "Int", y)
 
 Taper(chaine) {
     if (RythmeActuel().frappe[2] = 0) {
@@ -1347,13 +1358,13 @@ EstBarre(p) {
 ;  PARTIE FARM : menu, récolte, transfo, vente
 ; =============================================================================
 
-VERSION := "Macro v28"
+VERSION := "Macro v33"
 
 ; ---------- Quantités et poids ----------
 POIDS_OBJET := 0.2      ; kg par objet (récolté comme transformé)
 PAQUET      := 100      ; récolte et transfo : objets mis dans le véhicule à chaque dépôt
 PRISE_BRUT  := 200      ; transfo : objets à transformer repris du véhicule
-MARGE_KG    := 2        ; kg laissés libres dans l'inventaire quand le script calcule une prise
+MARGE_KG    := 1        ; kg laissés libres dans l'inventaire quand le script calcule une prise
 
 ; ---------- Véhicule ----------
 TOUCHE_COFFRE       := "l"    ; ouvre le coffre (le véhicule doit être déverrouillé)
@@ -1365,8 +1376,11 @@ SEUIL_PLEIN         := 0.995  ; barre de poids du véhicule remplie à 99,5 % = 
 ; était dans ton inventaire est transformé (un lot arrive toutes les 6 s)
 TRANSFO_FINIE := 20000
 
-; Vente : une fois les objets pris et le coffre refermé (Tab), touches et pauses (ms), dans l'ordre
-VENTE_ETAPES := [["e", 700], ["Enter", 680], ["Tab", 900], ["Enter", 1600]]
+; Vente : une fois les objets pris et le coffre refermé (Tab), pause avant E (ms), puis touches et
+; pauses (ms), dans l'ordre (chaque pause a jusqu'à 150 ms de plus au hasard). Si le E ou une
+; touche n'est plus pris en compte, allonge la pause qui la précède.
+VENTE_AVANT_E := 650
+VENTE_ETAPES := [["e", 450], ["Enter", 450], ["Tab", 500], ["Enter", 800]]
 
 ; ---------- Réglages retenus ----------
 activite   := LireReglage("activite", "farm")
@@ -1380,6 +1394,7 @@ appatAuto  := Integer(LireReglage("appatAuto", 0))
 BRUT       := LireReglage("brut", "Ressources précieuses")
 PRODUIT    := LireReglage("produit", "Pierres précieuses")
 POIDS_MAX  := Number(LireReglage("poidsMax", 103))     ; poids max de ton inventaire (kg)
+POIDS_VEHICULE := Number(LireReglage("poidsVehicule", 2000))   ; poids max du véhicule (kg)
 RAISON_ARRET := ""                                       ; pourquoi le farm s'est arrêté
 
 if !MODE_TEST {
@@ -1431,7 +1446,7 @@ OuvrirMenu(*) {
     ddEau   := g.Add("DropDownList", "x88 y95 w192", ["Eau douce", "Mer", "Glaces", "Tropical", "Doigt sanglant"])
     cbAppat := g.Add("CheckBox", "x32 y132 w250", "Attacher l'appât tout seul")
 
-    g.Add("GroupBox", "x16 y176 w280 h164", "Farm")
+    g.Add("GroupBox", "x16 y176 w280 h198", "Farm")
     rbRec := g.Add("Radio", "x32 y202 Group", "Récolte")
     rbTra := g.Add("Radio", "x120 y202", "Transfo")
     rbVen := g.Add("Radio", "x208 y202", "Vente")
@@ -1442,13 +1457,16 @@ OuvrirMenu(*) {
     txtM  := g.Add("Text", "x32 y306", "Poids max :")
     edM   := g.Add("Edit", "x110 y302 w60", POIDS_MAX)
     txtKg := g.Add("Text", "x178 y306", "kg (inventaire)")
+    txtV  := g.Add("Text", "x32 y340", "Véhicule :")
+    edV   := g.Add("Edit", "x110 y336 w60", POIDS_VEHICULE)
+    txtKgV := g.Add("Text", "x178 y340", "kg (poids max)")
 
-    g.Add("Text", "x16 y356", "Rythme :")
-    ddRythme := g.Add("DropDownList", "x80 y352 w216", ["Rapide", "Naturel", "Tranquille"])
-    btn    := g.Add("Button", "x16 y388 w280 h32 Default", "Valider")
-    btnCal := g.Add("Button", "x16 y426 w280 h26", "Calibrer cet écran (coffre ouvert)")
+    g.Add("Text", "x16 y390", "Rythme :")
+    ddRythme := g.Add("DropDownList", "x80 y386 w216", ["Rapide", "Naturel", "Tranquille"])
+    btn    := g.Add("Button", "x16 y422 w280 h32 Default", "Valider")
+    btnCal := g.Add("Button", "x16 y460 w280 h26", "Calibrer cet écran (coffre ouvert)")
     g.SetFont("s8 c808080", "Segoe UI")
-    g.Add("Text", "x16 y460 w280", PROFIL.exact ? "Profil d'écran exact enregistré." : "Profil d'écran : proportionnel (pas calibré).")
+    g.Add("Text", "x16 y494 w280", PROFIL.exact ? "Profil d'écran exact enregistré." : "Profil d'écran : proportionnel (pas calibré).")
 
     rbPeche.Value := (activite = "peche")
     rbFarm.Value  := (activite = "farm")
@@ -1465,11 +1483,11 @@ OuvrirMenu(*) {
         p := rbPeche.Value
         for ctl in [txtEau, ddEau, cbAppat]
             ctl.Enabled := p
-        for ctl in [rbRec, rbTra, rbVen, txtB, edB, txtP, edP, txtM, edM, txtKg]
+        for ctl in [rbRec, rbTra, rbVen, txtB, edB, txtP, edP, txtM, edM, txtKg, txtV, edV, txtKgV]
             ctl.Enabled := !p
     }
     Valider(*) {
-        global activite, modeActuel, eau, appatAuto, BRUT, PRODUIT, RYTHME, POIDS_MAX
+        global activite, modeActuel, eau, appatAuto, BRUT, PRODUIT, RYTHME, POIDS_MAX, POIDS_VEHICULE
         RYTHME     := ddRythme.Value
         activite   := rbPeche.Value ? "peche" : "farm"
         modeActuel := rbVen.Value ? "vente" : (rbTra.Value ? "transfo" : "recolte")
@@ -1482,8 +1500,12 @@ OuvrirMenu(*) {
         m := StrReplace(Trim(edM.Value), ",", ".")
         if (IsNumber(m) && m > 0)
             POIDS_MAX := Number(m)
+        m := StrReplace(Trim(edV.Value), ",", ".")
+        if (IsNumber(m) && m > 0)
+            POIDS_VEHICULE := Number(m)
         for cle, val in Map("activite", activite, "mode", modeActuel, "eau", eau, "appatAuto", appatAuto
-                , "brut", BRUT, "produit", PRODUIT, "poidsMax", POIDS_MAX, "rythme", RYTHME, "dejaLance", 1)
+                , "brut", BRUT, "produit", PRODUIT, "poidsMax", POIDS_MAX, "poidsVehicule", POIDS_VEHICULE
+                , "rythme", RYTHME, "dejaLance", 1)
             EcrireReglage(cle, val)
         g.Destroy()
         Etat("pause")
@@ -1503,7 +1525,7 @@ OuvrirMenu(*) {
     btn.OnEvent("Click", Valider)
     btnCal.OnEvent("Click", Calib)
     MajMenu()
-    g.Show("w312 h482")
+    g.Show("w312 h516")
 }
 
 ; ================= Coffre, arrêts, petites aides =================
@@ -1513,7 +1535,7 @@ FermerInventaire() {
         return
     Touche("Tab")
     Loop 10 {
-        Sleep 100
+        Dormir(100)
         if !InventaireOuvert()
             return
     }
@@ -1526,7 +1548,7 @@ OuvrirCoffre() {
     Loop 3 {
         if CoffreOuvert()
             return true
-        Sleep 250
+        Dormir(250)
     }
     if InventaireOuvert() {            ; inventaire seul (Tab) : on le ferme d'abord
         FermerInventaire()
@@ -1588,7 +1610,7 @@ ArretFarm(texte, fermer := true, toucheFin := "") {
         if InventaireOuvert() {
             texte .= " (mais j'ai pas appuyé sur " StrUpper(toucheFin) ", l'inventaire voulait pas se fermer)"
         } else {
-            Sleep 400
+            Dormir(400)
             Touche(toucheFin)
         }
     }
@@ -1624,7 +1646,7 @@ SignatureQuantite(cote := "inv") {
 ; Après un glisser : la quantité de la case a-t-elle changé (ou la case s'est vidée) ?
 QuantiteABouge(avant, cote := "inv") {
     Loop 8 {
-        Sleep 120
+        Dormir(120)
         if (!Detecte(cote) || SignatureQuantite(cote) != avant)
             return true
     }
@@ -1639,7 +1661,7 @@ DepotReussi(sig, fiAvant) {
     if (fiAvant < 0.02)
         return QuantiteABouge(sig)
     Loop 10 {
-        Sleep 120
+        Dormir(120)
         if (fiAvant - RemplissageInventaire() >= 0.02)
             return true
     }
@@ -1659,44 +1681,27 @@ DeposerPaquet(cibleX, cibleY) {
     return true
 }
 
-; Glisse q objets de la 1re case du véhicule vers l'inventaire. Si le jeu refuse (il en reste
-; moins de q), on prend tout ce qui reste, sans jamais dépasser q.
-; Renvoie le nombre pris (0 = rien), -1 si l'inventaire s'est fermé.
-PrendreDuVehicule(nom, q) {
+; Glisse q objets de la 1re case du véhicule vers l'inventaire. true si c'est passé.
+; Si le jeu refuse alors qu'on est sûr d'avoir la place (resteSiRefus), c'est qu'il en reste
+; moins de q dans le véhicule : un clic droit sur la case prend tout le reste.
+PrendreDuVehicule(nom, q, resteSiRefus) {
     sig := SignatureQuantite("veh")
     if !Glisser(VEH_X, VEH_Y, INV2_X, INV2_Y, q)
-        return -1
-    if QuantiteABouge(sig, "veh")
-        return q
-    return ViderCase("veh", nom, q - 1)
-}
-
-; Déplace ce qui reste dans la 1re case sans connaître le nombre exact, sans dépasser maxi :
-; on tente des quantités de plus en plus petites (64, 32, 16...). Si le jeu refuse, il n'y
-; en avait pas assez ; si ça passe, exactement ce nombre est parti.
-; Renvoie le nombre déplacé, ou -1 si l'inventaire s'est fermé en route.
-ViderCase(cote, nom, maxi, cibleX := 0, cibleY := 0) {
-    p := 1
-    while (p * 2 <= maxi)
-        p *= 2
-    deplace := 0
-    while (p >= 1) {
-        if (deplace + p <= maxi) {
-            if (!Detecte(cote) || !VerifierCase(cote, nom))
-                break
-            avant := SignatureQuantite(cote)
-            if (cote = "inv")
-                ok := Glisser(INV_X, INV_Y, cibleX, cibleY, p)
-            else
-                ok := Glisser(VEH_X, VEH_Y, INV2_X, INV2_Y, p)
-            if !ok
-                return -1
-            if QuantiteABouge(avant, cote)
-                deplace += p
-        }
-        p //= 2
+        return false
+    if QuantiteABouge(sig, "veh") {
+        Journal(nom " : " q " pris")
+        return true
     }
-    return deplace
+    if !resteSiRefus {
+        Journal(nom " : " q " refusé, j'attends d'avoir plus de place")
+        return false
+    }
+    if (!ClicDroit(VEH_X, VEH_Y) || !QuantiteABouge(sig, "veh")) {
+        Journal(nom " : " q " refusé, et rien pris au clic droit")
+        return false
+    }
+    Journal(nom " : moins de " q " restants, tout le reste pris au clic droit")
+    return true
 }
 
 ; Y a-t-il au moins 100 objets dans la 1re case ? Le nombre est lu 3 fois (il change
@@ -1852,8 +1857,9 @@ CycleRecolte() {
 
 ; ================= Transfo =================
 ; Coffre ouvert (L si besoin), objets transformés recherchés à gauche, objets à transformer
-; à droite. Le script en prend 200 (moins si ton poids ne le permet pas) ; dès que 100 sont
-; transformés, il les remet dans le véhicule et en reprend 200.
+; à droite. Le script en prend 200 ; dès que 100 sont transformés, il les remet dans le
+; véhicule et retente 200 (jamais un autre nombre : si t'es trop lourd, le jeu refuse et il
+; retente au dépôt suivant).
 ; Fin : plus aucun objet à transformer dans le véhicule ET véhicule plein (tout est
 ; transformé et redéposé) : Tab, U (verrouillage) et pause. Si le véhicule n'est pas plein
 ; à la fin, rien n'est touché et le script se met en pause avec un message.
@@ -1899,16 +1905,15 @@ CycleTransfo() {
             sigAvant := sig, dernierChangement := Horloge()
         fini := (Horloge() - dernierChangement >= TRANSFO_FINIE)
         brutVehicule := Detecte("veh")
-        ; 3. on reprend de quoi transformer : au lancement, après chaque dépôt, et quand
-        ; tout est transformé (prise précédente plus petite que 100, à cause du poids)
+        ; 3. on reprend 200 objets à transformer : au lancement, après chaque dépôt, et quand
+        ; tout est transformé (il en restait moins de 200 dans le véhicule)
         if (brutVehicule && (premiere || deposes > 0 || fini)) {
             premiere := false
-            n := PrendreBrut()
+            pris := PrendreBrut(fini)
             dernierChangement := Horloge()
-            if (n > 0) {
+            if pris {
                 echecs := 0, sature := false   ; le véhicule a de la place à nouveau
-                Journal("Transfo : " n " " BRUT " pris")
-            } else if (n < 0 && fini && ++echecs >= 3) {
+            } else if (fini && ++echecs >= 3) {
                 ArretFarm("Rien ne se transforme et je peux plus rien prendre. T'es sorti de la zone ou t'es blindé ? Transfo arrêtée", false)
             }
         }
@@ -1925,9 +1930,10 @@ CycleTransfo() {
     enCours := false
 }
 
-; Fin de transfo. On vérifie qu'il ne reste rien à transformer dans l'inventaire, on dépose
-; les derniers objets transformés (moins de 100), puis les deux conditions : plus aucun objet
-; à transformer dans le véhicule et véhicule plein. Si oui : Tab, U et pause.
+; Fin de transfo. On vérifie qu'il ne reste rien à transformer dans l'inventaire, puis les
+; deux conditions : plus aucun objet à transformer dans le véhicule et véhicule plein. Si oui :
+; Tab, U et pause. Les derniers objets transformés (moins de 100) restent dans ton inventaire,
+; ils partiront avec la vente.
 ; Renvoie false s'il reste des objets à transformer dans l'inventaire (on attend encore),
 ; true s'il en reste dans le véhicule (le cycle reprend).
 FinTransfo() {
@@ -1940,11 +1946,6 @@ FinTransfo() {
         Journal("Fin de transfo : il reste des " BRUT " dans l'inventaire, j'attends")
         return false
     }
-    ; même si la barre paraît pleine : à 99,5 %, il peut manquer une vingtaine d'objets
-    if (Detecte("inv") && VerifierCase("inv", PRODUIT)) {
-        n := ViderCase("inv", PRODUIT, PAQUET - 1, VEH2_X, VEH2_Y)
-        Journal("Fin de transfo : " n " " PRODUIT " déposés")
-    }
     ; recherche retapée : une case vide doit vraiment vouloir dire "plus rien à transformer"
     Rechercher("veh", BRUT)
     Attendre(400, 600)
@@ -1955,49 +1956,56 @@ FinTransfo() {
     ArretFarm("Transfo finie mais le véhicule est pas plein (" Round(Max(0, RemplissageCamion()) * 100) " %), je ferme pas à clé", false)
 }
 
-; Prend des objets à transformer : 200, ou moins si ton inventaire ne peut pas en porter
-; autant. Renvoie le nombre pris, 0 s'il n'y en a plus dans le véhicule, -1 si rien n'a pu
-; être pris (pas la place, recherche pas en place).
-PrendreBrut() {
+; Tente toujours de prendre 200 objets à transformer, jamais un autre nombre : si t'es trop
+; lourd, le jeu refuse et on retente au prochain dépôt. Quand tout est transformé (fini) et
+; que 200 rentrait, un refus veut dire qu'il en reste moins dans le véhicule : le clic droit
+; prend le reste. Renvoie true si quelque chose a été pris.
+PrendreBrut(fini) {
     FiltreInventaire(PRODUIT)              ; il faut une case vide pour les recevoir
     if !VerifierCase("veh", BRUT)
-        return Detecte("veh") ? -1 : 0
-    q := Min(PRISE_BRUT, PlaceInventaire())
-    if (q <= 0)
-        return -1
-    n := PrendreDuVehicule(BRUT, q)
-    return (n > 0) ? n : (Detecte("veh") ? -1 : 0)
+        return false
+    ; clic droit seulement si on est sûr que 200 rentrait : sinon, le refus venait du poids
+    return PrendreDuVehicule(BRUT, PRISE_BRUT, fini && PlaceInventaire() >= PRISE_BRUT)
 }
 
 ; ================= Vente =================
-; Coffre ouvert (L si besoin), objets transformés recherchés des deux côtés. Le script lit
-; ton poids sur la barre de l'inventaire et prend d'un coup ce qui rentre en gardant 2 kg
-; libres (s'il en reste moins dans le véhicule, clic droit : tout le reste). Puis Tab (on
+; Coffre ouvert (L si besoin), objets transformés recherchés dans le véhicule. Le script lit
+; ton poids sur la barre de l'inventaire et prend d'un coup ce qui rentre en gardant 1 kg
+; libre (si le reste du véhicule pèse moins, clic droit : tout le reste). Puis Tab (on
 ; ressort du coffre) et la suite des touches de vente. En boucle, jusqu'à ce que le véhicule
-; n'en ait plus.
+; n'en ait plus. Si ton poids n'a pas baissé depuis la prise, la vente a sauté (E pas pris) :
+; il ne reprend rien et retourne vendre.
 
 CycleVente() {
     global enCours
     enCours := true
+    attendu := -1                              ; après la vente, ton poids doit passer sous ça
+    sautees := 0                               ; ventes sautées de suite
     while enMarche {
         AttendreRetourJeu()
         if !AssurerCoffre()
             continue
-        ; l'inventaire filtré laisse une case vide pour recevoir les objets
         Rechercher("veh", PRODUIT)
-        Attendre(250, 400)
-        Rechercher("inv", PRODUIT)
         Attendre(300, 450)
-        dejaLa := Detecte("inv")               ; objets transformés déjà dans l'inventaire
-        if (!Detecte("veh") && !dejaLa)
-            ArretFarm("Plus de " PRODUIT " dans le véhicule, vente terminée. T'es riche fréro")
-        q := PlaceInventaire()
-        pris := false
-        if (q > 0 && Detecte("veh") && VerifierCase("veh", PRODUIT))
-            pris := PrendreVente(q)
-        if (!pris && !dejaLa) {
-            SauverImage(Photo("logcoffre", EcX(0), EcY(220), EcX(2560), EcY(520)), "vente_rien_pris")
-            ArretFarm("Rien pu prendre (place pour " q " d'après ton poids). T'as mis le bon poids max dans le menu 7 ? Vente arrêtée")
+        fi := RemplissageInventaire()
+        if (attendu >= 0 && fi >= attendu) {
+            ; ton poids n'a pas baissé : les objets pris sont encore sur toi
+            if (++sautees >= 3)
+                ArretFarm("3 ventes de suite sans que ton poids baisse : le vendeur prend pas ? Vente arrêtée")
+            Journal("Vente sautée (ton poids a pas baissé), je retourne vendre sans rien reprendre")
+        } else {
+            sautees := 0
+            if !Detecte("veh")
+                ArretFarm("Plus de " PRODUIT " dans le véhicule, vente terminée. T'es riche fréro")
+            q := PlaceInventaire()
+            priseKg := (q > 0 && VerifierCase("veh", PRODUIT)) ? PrendreVente(q) : 0
+            if !priseKg {
+                SauverImage(Photo("logcoffre", EcX(0), EcY(220), EcX(2560), EcY(520)), "vente_rien_pris")
+                ArretFarm("Rien pu prendre (place pour " q " d'après ton poids). T'as mis le bon poids max dans le menu 7 ? Vente arrêtée")
+            }
+            ; la vente doit faire baisser ton poids d'au moins la moitié de la prise (pas de
+            ; vérification pour une toute petite prise, la barre n'est pas assez précise)
+            attendu := (priseKg >= 2) ? fi + priseKg / 2 / POIDS_MAX : -1
         }
         ; on ressort du coffre (2 essais), puis E et la suite, seulement si c'est bien fermé
         Loop 2 {
@@ -2007,7 +2015,8 @@ CycleVente() {
         }
         if InventaireOuvert()
             ArretFarm("Le coffre veut pas se refermer, j'appuie pas sur E. Vente arrêtée")
-        Attendre(400, 600)
+        ; le jeu ignore parfois un E tapé juste après la fermeture du coffre : on lui laisse le temps
+        Attendre(VENTE_AVANT_E, VENTE_AVANT_E + 150)
         for etape in VENTE_ETAPES {
             Touche(etape[1])
             Attendre(etape[2], etape[2] + 150)
@@ -2016,23 +2025,28 @@ CycleVente() {
     enCours := false
 }
 
-; Prend q objets de la 1re case du véhicule. Si le jeu refuse, il en reste moins de q : un clic
-; droit sur la case prend tout le reste (il rentre forcément, q est la place qu'on a).
-; Renvoie true si quelque chose a été pris.
+; Prend q objets (la place libre de ton inventaire). Si ce qui reste dans le véhicule pèse moins
+; que cette place (barre du véhicule x poids max du véhicule réglé dans le menu), un clic droit
+; prend tout le reste d'un coup ; sinon on glisse q. Si le premier geste ne prend rien (poids
+; du véhicule mal réglé), on tente l'autre. Les objets peuvent être lâchés sur n'importe quelle
+; case de ton inventaire, le jeu les range tout seul.
+; Renvoie le poids pris (kg, estimé pour le clic droit), 0 si rien n'a été pris.
 PrendreVente(q) {
-    sig := SignatureQuantite("veh")
-    if !Glisser(VEH_X, VEH_Y, INV2_X, INV2_Y, q)
-        return false
-    if QuantiteABouge(sig, "veh") {
-        Journal("Vente : " q " " PRODUIT " pris")
-        return true
+    resteKg := RemplissageCamion() * POIDS_VEHICULE      ; négatif si la barre n'est pas vue
+    clicDabord := (resteKg >= 0 && resteKg <= q * POIDS_OBJET)
+    Loop 2 {
+        clic := (A_Index = 1) ? clicDabord : !clicDabord
+        sig := SignatureQuantite("veh")
+        if !(clic ? ClicDroit(VEH_X, VEH_Y) : Glisser(VEH_X, VEH_Y, INV2_X, INV2_Y, q))
+            return 0
+        if QuantiteABouge(sig, "veh") {
+            Journal(clic ? "Vente : le reste du véhicule (" Round(resteKg) " kg) pris au clic droit"
+                : "Vente : " q " " PRODUIT " pris")
+            return clic ? Min(Max(resteKg, POIDS_OBJET), q * POIDS_OBJET) : q * POIDS_OBJET
+        }
     }
-    if (!ClicDroit(VEH_X, VEH_Y) || !QuantiteABouge(sig, "veh")) {
-        Journal("Vente : " q " refusé, et rien pris au clic droit")
-        return false
-    }
-    Journal("Vente : moins de " q " " PRODUIT " restants, tout le reste pris au clic droit")
-    return true
+    Journal("Vente : rien pris (ni " q " ni au clic droit)")
+    return 0
 }
 
 ; ================= Lecture de la quantité d'une case =================

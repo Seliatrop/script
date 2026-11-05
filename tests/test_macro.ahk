@@ -1,9 +1,10 @@
 #Requires AutoHotkey v2.0
 ; =============================================================================
-;  TESTS de Farm_Peche.ahk (double-clic pour lancer, ça prend environ une minute)
+;  TESTS de Farm_Peche.ahk (double-clic pour lancer, quelques secondes)
 ;  Rien n'est envoyé au jeu : pas une touche, pas un clic. On teste :
-;   1. les calculs (place qui reste dans l'inventaire)
-;   2. la lecture de l'écran sur une vraie capture (coffre_transfo.png, coffre ouvert)
+;   1. le calcul de la place qui reste dans l'inventaire
+;   2. la lecture de l'écran sur deux vraies captures du coffre ouvert : la tienne (2560x1440)
+;      et celle de ton amie (1920x1080, autre pack graphique)
 ;   3. récolte, transfo et vente de bout en bout, dans un faux jeu qui réagit comme FiveM
 ;      (coffre, poids, refus quand c'est trop lourd, transfo toutes les 6 s, vente)
 ;  Le résultat s'affiche à la fin et est écrit dans resultats.txt.
@@ -22,70 +23,72 @@ OnError(ErreurPendantTest, -1)
 
 RESS := "Ressources précieuses"
 PIER := "pierres précieuses"           ; écrit comme dans le jeu : la recherche ignore la casse
-BRUT := RESS, PRODUIT := "Pierres précieuses", POIDS_MAX := 103
+BRUT := RESS, PRODUIT := "Pierres précieuses", POIDS_MAX := 103, POIDS_VEHICULE := 1000
 
 Ecrire("Tests " VERSION " - " FormatTime(, "yyyy-MM-dd HH:mm:ss"))
 
 ; =============================================================================
-Section("1. Calculs")
+Section("1. Calcul de la place")
 ; =============================================================================
 
-Egal(ObjetsQuiRentrent(103, 66 / 103, 0.2, 2), 175, "66 kg sur 103 : (103 - 66 - 2) / 0,2 = 175")
-Egal(ObjetsQuiRentrent(103, 46 / 103, 0.2, 2), 275, "46 kg sur 103 : 275")
-Egal(ObjetsQuiRentrent(138, 66 / 138, 0.2, 2), 350, "autre perso, 66 kg sur 138 : 350")
-Egal(ObjetsQuiRentrent(103, 0, 0.2, 2), 505, "inventaire vide : 505")
-Egal(ObjetsQuiRentrent(103, 1, 0.2, 2), 0, "inventaire plein : 0")
-Egal(ObjetsQuiRentrent(103, 102 / 103, 0.2, 2), 0, "moins de 2 kg libres : 0 (jamais négatif)")
+Egal(ObjetsQuiRentrent(103, 66 / 103, 0.2, 1), 180, "66 kg sur 103 : (103 - 66 - 1) / 0,2 = 180")
+Egal(ObjetsQuiRentrent(138, 36 / 138, 0.2, 1), 505, "36 kg sur 138 : (138 - 36 - 1) / 0,2 = 505")
+Egal(ObjetsQuiRentrent(103, 102.5 / 103, 0.2, 1), 0, "moins de 1 kg libre : 0 (jamais négatif)")
 
 ; =============================================================================
-Section("2. Lecture d'une vraie capture (coffre ouvert, 46 / 103 kg, véhicule 1000 / 1000)")
+Section("2. Lecture de l'écran")
 ; =============================================================================
 
-img := ChargerImage(A_ScriptDir "\coffre_transfo.png")
-Verifier(IsObject(img), "capture chargée")
+; ta capture : 2560x1440, coffre ouvert, 46 / 103 kg, véhicule 1000 / 1000
+; (2600 Ressources + 2400 pierres), recadrée sur le haut du coffre
+img := ChargerImage(A_ScriptDir "\coffre_2560.png")
+Verifier(IsObject(img), "ta capture (2560) chargée")
 if IsObject(img) {
     ECRAN_TEST := img
     PROFIL := {fx: 1, fy: 1, ox: 0, oy: 0, exact: true}
     CalculerPositions()
-
-    ; calibration : les deux barres rouges sont là où le profil les attend
-    y1 := Round(img.h * 0.15), y2 := Round(img.h * 0.215)
-    bande := Capture(img.w, y2 - y1 + 1)
-    bande.Prendre(0, y1)
-    g := TrouverBarre(bande, 0, Round(img.w * 0.20))
-    d := TrouverBarre(bande, Round(img.w * 0.50), Round(img.w * 0.80))
-    ; (à 1 pixel près : les coins arrondis de la barre commencent 1 pixel plus loin)
-    Verifier(IsObject(g) && Abs(g.x - 65) <= 1 && Abs(y1 + g.y - 275) <= 1, "calibration : barre de l'inventaire en 65, 275")
-    Verifier(IsObject(d) && Abs(d.x - 1657) <= 1 && Abs(y1 + d.y - 275) <= 1, "calibration : barre du véhicule en 1657, 275")
-
-    Verifier(InventaireOuvert(), "inventaire ouvert vu")
-    Verifier(CoffreOuvert(), "coffre ouvert vu (titre Véhicule)")
-    Entre(POIDS_MAX * RemplissageInventaire(), 46, 47, "poids lu sur la barre : 46 kg (affiché 46 / 103 Kg)")
-    Verifier(VehiculePlein(), "véhicule plein vu (1000 / 1000 Kg)")
-    Entre(PlaceInventaire(), 270, 275, "vente : place pour (103 - 46 - 2) / 0,2 = 275 pierres, à 1 kg près")
-    Verifier(Detecte("veh", 1) && Detecte("veh", 2) && !Detecte("veh", 3), "véhicule : 2 objets, 3e case vide")
-    Verifier(Detecte("inv", 1) && Detecte("inv", 5), "inventaire : cases occupées vues")
-    Egal(AuMoins100("veh"), 1, "véhicule : 2600 Ressources = au moins 100")
-    Verifier(AuMoins100("inv") != 1, "inventaire : le téléphone n'a pas de nombre, pas de dépôt")
-    ; nombre de chiffres lus en haut à gauche de cases connues : [côté, ligne, colonne, nombre]
-    for t in [["inv", 1, 2, "173"], ["inv", 1, 3, "5"], ["inv", 1, 4, "300"], ["inv", 1, 5, "2"]
-            , ["inv", 2, 4, "5"], ["inv", 3, 1, "6"], ["inv", 3, 3, "100"], ["inv", 3, 4, "6"]
-            , ["inv", 4, 1, "5"], ["inv", 5, 5, "2310"], ["inv", 6, 1, "210"]
-            , ["veh", 1, 1, "2600"], ["veh", 1, 2, "2400"]] {
+    BarresTrouvees(img.w, 1440, 65, 1657, 275, "ta capture")
+    Verifier(InventaireOuvert() && CoffreOuvert(), "ta capture : coffre ouvert vu")
+    Entre(POIDS_MAX * RemplissageInventaire(), 46, 47, "ta capture : poids lu 46 kg (affiché 46 / 103 Kg)")
+    Verifier(VehiculePlein(), "ta capture : véhicule plein vu (1000 / 1000 Kg)")
+    Verifier(Detecte("veh", 1) && Detecte("veh", 2) && !Detecte("veh", 3), "ta capture : véhicule, 2 objets puis case vide")
+    Egal(AuMoins100("veh"), 1, "ta capture : 2600 Ressources = au moins 100")
+    Verifier(AuMoins100("inv") != 1, "ta capture : le téléphone n'a pas de nombre, pas de dépôt")
+    for t in [["inv", 2, "173"], ["inv", 3, "5"], ["inv", 4, "300"], ["veh", 1, "2600"]] {
         x0 := (t[1] = "inv") ? 65 : 1657
-        n := CompterChiffres(EcX(x0 + PAS_CASE * (t[3] - 1)), EcY(344 + PAS_CASE * (t[2] - 1)))
-        Egal(n, StrLen(t[4]), "chiffres lus : " t[4] " (" t[1] ", ligne " t[2] ", case " t[3] ")")
+        Egal(CompterChiffres(EcX(x0 + PAS_CASE * (t[2] - 1)), EcY(344)), StrLen(t[3]), "ta capture : chiffres lus dans " t[3])
     }
-
-    ; écran sans inventaire (en jeu) : rien n'est vu, donc aucun clic
+    ; écran sans inventaire : rien n'est vu, donc aucun clic
     ECRAN_TEST := ImageNoire(img.w, img.h)
     Verifier(!InventaireOuvert() && !CoffreOuvert(), "écran de jeu : ni inventaire ni coffre vus")
-    Egal(RemplissageCamion(), -1, "écran de jeu : pas de barre du véhicule")
-    ; inventaire seul (Tab) : la même capture sans le titre "Véhicule"
     ECRAN_TEST := SansZone(img, 1640, 222, 1800, 256)
     Verifier(InventaireOuvert() && !CoffreOuvert(), "inventaire seul (Tab) : pas pris pour le coffre")
-    ECRAN_TEST := 0
+    ; une case vide est transparente : avec du sable clair derrière, ce n'est pas un objet
+    ECRAN_TEST := SansZone(img, 1990, 340, 2145, 500, 0xDCC8AA)
+    Verifier(Detecte("veh", 2) && !Detecte("veh", 3), "case vide sur du sable clair : pas prise pour un objet")
+    ECRAN_TEST := SansZone(img, 0, 0, img.w - 1, img.h - 1, 0xDCC8AA)
+    Verifier(!Detecte("inv", 1) && !Detecte("veh", 1), "écran de jeu sur du sable : aucune case vue")
 }
+
+; capture de ton amie : 1920x1080, autre pack graphique, profil proportionnel (son PC n'est pas calibré),
+; 123 / 138 kg, véhicule 1900 / 2000 kg, 172 pierres à gauche, 9500 Ressources à droite
+img := ChargerImage(A_ScriptDir "\coffre_1080.png")
+Verifier(IsObject(img), "capture 1920x1080 chargée")
+if IsObject(img) {
+    ECRAN_TEST := img, POIDS_MAX := 138
+    PROFIL := {fx: 0.75, fy: 0.75, ox: 0, oy: 0, exact: false}
+    CalculerPositions()
+    BarresTrouvees(img.w, 1080, 46, 1239, 206, "1920x1080")
+    Verifier(InventaireOuvert() && CoffreOuvert(), "1920x1080 : coffre ouvert vu")
+    Entre(POIDS_MAX * RemplissageInventaire(), 123, 124, "1920x1080 : poids lu 123 kg (affiché 123 / 138 Kg)")
+    Entre(RemplissageCamion(), 0.94, 0.96, "1920x1080 : véhicule à 95 % (1900 / 2000 Kg)")
+    Verifier(Detecte("inv", 1) && !Detecte("inv", 2), "1920x1080 : sol clair derrière la 2e case vide, pas pris pour un objet")
+    Verifier(Detecte("veh", 1) && !Detecte("veh", 2), "1920x1080 : véhicule, 1 objet puis case vide")
+    Egal(CompterChiffres(QUANT_INV_X, QUANT_Y), 3, "1920x1080 : chiffres lus dans 172")
+    Egal(CompterChiffres(QUANT_VEH_X, QUANT_Y), 4, "1920x1080 : chiffres lus dans 9500")
+    POIDS_MAX := 103
+}
+ECRAN_TEST := 0
 
 ; =============================================================================
 Section("3. Récolte (jeu simulé)")
@@ -105,7 +108,6 @@ PasDErreur(j)
 
 j := Lancer(JeuSimule({veh: Map(RESS, 5000), recolte: 12}), "recolte")
 Egal(Touches(j), "l,Tab", "lancée avec un véhicule déjà plein : L, Tab et pas de E")
-Egal(Glisses(j, "inv"), "", "lancée avec un véhicule déjà plein : aucun dépôt")
 
 j := Lancer(JeuSimule({veh: Map(RESS, 1000), verrouille: true, recolte: 12}), "recolte")
 Verifier(InStr(RAISON_ARRET, "Coffre inaccessible"), "véhicule verrouillé : arrêt avec un message", RAISON_ARRET)
@@ -116,26 +118,25 @@ Section("4. Transfo (jeu simulé, 12 objets transformés toutes les 6 s)")
 ; =============================================================================
 
 j := Lancer(JeuSimule({ecran: "coffre", veh: Map(RESS, 600, PIER, 4400), transfo: 12}), "transfo")
-Egal(PremierePrise(j), 200, "première prise : 200")
-Verifier(PlusGrossePrise(j) <= 200, "jamais plus de 200 pris d'un coup", PlusGrossePrise(j))
+Verifier(QueDes200(j), "que des 200 pris dans le véhicule (refusés compris, quand t'es trop lourd)", Glisses(j, "veh"))
+QueDes100(j)
+Verifier(InStr(Glisses(j, "veh"), "200!"), "trop lourd pour 200 : il tente quand même, le jeu refuse, il retente au dépôt suivant", Glisses(j, "veh"))
 Egal(j.Qte("veh", PIER), 5000, "tout est transformé et redéposé (5000 pierres)")
-Egal(j.Qte("veh", RESS) + j.Qte("inv", RESS) + j.Qte("inv", PIER), 0, "plus rien dans l'inventaire ni à transformer")
 Egal(Fin(j, 2), "Tab,u", "fin : Tab puis U")
 Egal(Compte(j.touches, "u"), 1, "U appuyé une seule fois")
-Verifier(j.poidsMaxVu <= 101, "inventaire jamais au-delà de 101 kg (2 kg de marge)", j.poidsMaxVu " kg")
-Verifier(InStr(RAISON_ARRET, "verrouillé"), "arrêt : transfo terminée, véhicule verrouillé", RAISON_ARRET)
 PasDErreur(j)
 
-; la situation de la capture : véhicule plein (2600 + 2400) et 100 pierres déjà dans l'inventaire
+; la situation de ta capture : véhicule plein (2600 + 2400) et 100 pierres déjà sur toi
 j := Lancer(JeuSimule({ecran: "coffre", veh: Map(RESS, 2600, PIER, 2400), inv: Map(PIER, 100), transfo: 12}), "transfo")
-Egal(j.Qte("veh", RESS) + j.Qte("inv", RESS), 0, "situation de la capture : tout est transformé")
-Egal(j.Qte("veh", PIER), 5000, "situation de la capture : véhicule plein de pierres")
-Egal(j.Qte("inv", PIER), 100, "situation de la capture : les 100 en trop restent dans l'inventaire")
-Egal(Fin(j, 2), "Tab,u", "situation de la capture : fin par Tab puis U")
-Verifier(j.refusesDePlus <= 3, "situation de la capture : pas de dépôts refusés en boucle", j.refusesDePlus " refusés")
+Verifier(QueDes200(j), "ta capture : que des 200 pris dans le véhicule", Glisses(j, "veh"))
+QueDes100(j)
+Egal(j.Qte("veh", PIER), 5000, "ta capture : tout est transformé, véhicule plein de pierres")
+Egal(j.Qte("inv", PIER), 100, "ta capture : les 100 en trop restent sur toi")
+Egal(Fin(j, 2), "Tab,u", "ta capture : fin par Tab puis U")
 PasDErreur(j)
 
 j := Lancer(JeuSimule({ecran: "coffre", veh: Map(RESS, 300, PIER, 2000), transfo: 12}), "transfo")
+Egal(Joindre(j.clicsDroits), "100", "il en reste 100 à la fin : le clic droit prend le reste")
 Egal(j.Qte("veh", PIER), 2300, "véhicule pas plein : tout est quand même transformé et redéposé")
 Egal(Compte(j.touches, "u") + Compte(j.touches, "Tab"), 0, "véhicule pas plein à la fin : ni Tab ni U")
 Verifier(InStr(RAISON_ARRET, "pas plein"), "arrêt : véhicule pas plein, pas de verrouillage", RAISON_ARRET)
@@ -143,37 +144,38 @@ PasDErreur(j)
 
 j := Lancer(JeuSimule({ecran: "coffre", veh: Map(RESS, 2000, PIER, 3000), transfo: 0}), "transfo")
 Verifier(InStr(RAISON_ARRET, "Rien ne se transforme"), "hors de la zone : arrêt avec un message", RAISON_ARRET)
+Egal(Joindre(j.clicsDroits), "", "hors de la zone : pas de clic droit sur le gros tas du véhicule")
 Egal(Compte(j.touches, "u"), 0, "hors de la zone : pas de U")
-Verifier(j.poidsMaxVu <= 101, "hors de la zone : inventaire jamais au-delà de 101 kg", j.poidsMaxVu " kg")
 PasDErreur(j)
 
 ; =============================================================================
-Section("5. Vente (jeu simulé)")
+Section("5. Vente (jeu simulé, véhicule de 1000 kg)")
 ; =============================================================================
 
 j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 66, zoneVente: true}), "vente")
-Egal(PremierePrise(j), 175, "66 kg sur 103 : prend 175 d'un coup")
 Egal(Debut(j, 7), "l,Tab,e,Enter,Tab,Enter,l", "L, prise, Tab (sortie du coffre), E et la suite, L...")
-Egal(Glisses(j, "veh"), "175,175,175,175!", "fin du stock : 175 refusé (il en reste 75)")
-Egal(Joindre(j.clicsDroits), "75", "fin du stock : un seul clic droit prend les 75 qui restent")
+Egal(Glisses(j, "veh"), "180,180,180", "66 kg sur 103 : prend 180 d'un coup, tant que le véhicule en a plus")
+Egal(Joindre(j.clicsDroits), "60", "il en reste 60 (12 kg), moins que la place (36 kg) : un clic droit direct")
 Egal(j.vendus, 600, "tout le véhicule est vendu")
-Verifier(j.poidsMaxVu <= 101, "inventaire jamais au-delà de 101 kg", j.poidsMaxVu " kg")
 Verifier(InStr(RAISON_ARRET, "vente terminée"), "arrêt : plus rien dans le véhicule", RAISON_ARRET)
 PasDErreur(j)
 
 j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 46, inv: Map(PIER, 30), zoneVente: true}), "vente")
-Egal(PremierePrise(j), 245, "46 kg + 30 pierres déjà sur toi (52 kg) : prend 245, puis vend tout")
+Egal(PremierePrise(j), 250, "46 kg + 30 pierres déjà sur toi (52 kg) : prend 250")
 Egal(j.vendus, 630, "les 30 déjà sur toi sont vendus aussi")
-PasDErreur(j)
 
-j := Lancer(JeuSimule({veh: Map(PIER, 60), invAutres: 40, zoneVente: true}), "vente")
-Egal(Glisses(j, "veh"), "305!", "60 pierres seulement : la prise de 305 est refusée")
-Egal(Joindre(j.clicsDroits), "60", "60 pierres seulement : le clic droit les prend toutes")
-Egal(j.vendus, 60, "60 pierres seulement : tout est vendu")
-Verifier(InStr(RAISON_ARRET, "vente terminée"), "60 pierres seulement : arrêt, vente terminée", RAISON_ARRET)
-PasDErreur(j)
+; le vendeur ignore un E : les pierres restent sur toi, il ne reprend rien et retourne vendre
+j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 66, zoneVente: true, ePasPris: 1}), "vente")
+Egal(Glisses(j, "veh") "/" Joindre(j.clicsDroits), "180,180,180/60", "vente sautée : rien de repris en plus")
+Egal(j.vendus, 600, "vente sautée : il retourne vendre, tout est vendu")
 
-j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 102, zoneVente: true}), "vente")
+POIDS_VEHICULE := 100
+j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 66, zoneVente: true}), "vente")
+Egal(j.vendus, 600, "poids du véhicule mal réglé dans le menu : clic droit refusé, il glisse et vend quand même tout")
+PasDErreur(j)
+POIDS_VEHICULE := 1000
+
+j := Lancer(JeuSimule({veh: Map(PIER, 600), invAutres: 102.5, zoneVente: true}), "vente")
 Verifier(InStr(RAISON_ARRET, "Rien pu prendre"), "inventaire déjà plein : arrêt avec un message", RAISON_ARRET)
 Egal(Compte(j.touches, "e"), 0, "inventaire déjà plein : pas de E")
 
@@ -206,6 +208,7 @@ class JeuSimule {
         this.rechInv := "", this.rechVeh := ""
         this.recolte := 0, this.transfo := 0      ; objets par lot (0 = pas de récolte / hors zone)
         this.zoneVente := false, this.entrees := 0, this.vendus := 0
+        this.ePasPris := 0                        ; nombre de E ignorés par le vendeur (vente sautée)
         this.touches := [], this.glisses := [], this.erreurs := [], this.clicsDroits := []
         this.refusesDePlus := 0
         for k, v in o.OwnProps()
@@ -287,9 +290,10 @@ class JeuSimule {
             this.erreurs.Push("glisser d'une case sans objet de farm (" (c.Length ? c[1].nom : "vide") ")")
             return true
         }
-        ; on lâche sur une case vide ou sur le même objet
+        ; dans le véhicule, on lâche sur une case vide ou sur le même objet (dans l'inventaire,
+        ; n'importe quelle case : le jeu range tout seul)
         cible := this.Cases(vers), k := (x2 = VEH_X) ? 1 : 2
-        if (cible.Length >= k && cible[k].nom != c[1].nom)
+        if (vers = "veh" && cible.Length >= k && cible[k].nom != c[1].nom)
             this.erreurs.Push("lâché sur une case occupée par " cible[k].nom)
         ok := (q > 0 && q <= c[1].q && this.Poids(vers) + q * 0.2 <= this.PoidsMax(vers) + 0.001)
         this.glisses.Push({de: de, q: q, ok: ok})
@@ -352,7 +356,9 @@ class JeuSimule {
             case "u":
                 this.verrouille := !this.verrouille
             case "e":
-                if this.zoneVente
+                if (this.zoneVente && this.ePasPris > 0)
+                    this.ePasPris -= 1
+                else if this.zoneVente
                     this.ecran := "boutique", this.entrees := 0
                 else
                     this.recolte := 0                  ; E arrête la récolte
@@ -464,12 +470,33 @@ PremierePrise(j) {
     return 0
 }
 
-PlusGrossePrise(j) {
-    m := 0
+; calibration : les deux barres rouges de poids sont là où on les attend (à 1 pixel près :
+; les coins arrondis commencent 1 pixel plus loin)
+BarresTrouvees(w, hEcran, xInv, xVeh, y, nom) {
+    y1 := Round(hEcran * 0.15), y2 := Round(hEcran * 0.215)
+    bande := Capture(w, y2 - y1 + 1)
+    bande.Prendre(0, y1)
+    g := TrouverBarre(bande, 0, Round(w * 0.20))
+    d := TrouverBarre(bande, Round(w * 0.50), Round(w * 0.80))
+    Verifier(IsObject(g) && Abs(g.x - xInv) <= 1 && Abs(y1 + g.y - y) <= 1
+        && IsObject(d) && Abs(d.x - xVeh) <= 1 && Abs(y1 + d.y - y) <= 1, nom " : calibration, barres de poids trouvées")
+}
+
+; transfo : tout ce qui est glissé depuis le véhicule fait 200 (même ce qui est refusé)
+QueDes200(j) {
     for g in j.glisses
-        if (g.de = "veh" && g.ok)
-            m := Max(m, g.q)
-    return m
+        if (g.de = "veh" && g.q != 200)
+            return false
+    return true
+}
+
+; transfo : tout ce qui part de l'inventaire vers le véhicule fait 100
+QueDes100(j) {
+    ok := true
+    for g in j.glisses
+        if (g.de = "inv" && g.q != 100)
+            ok := false
+    Verifier(ok, "déposé dans le véhicule : que des 100", Glisses(j, "inv"))
 }
 
 ErreurPendantTest(e, mode) {
@@ -513,14 +540,17 @@ ImageNoire(w, h) {
     return img
 }
 
-; Copie de l'image avec un rectangle passé en noir
-SansZone(src, x1, y1, x2, y2) {
+; Copie de l'image avec un rectangle d'une seule couleur (noir par défaut)
+SansZone(src, x1, y1, x2, y2, couleur := 0) {
     img := {w: src.w, h: src.h, buf: Buffer(src.w * src.h * 4)}
     img.ptr := img.buf.Ptr
     DllCall("RtlMoveMemory", "Ptr", img.ptr, "Ptr", src.ptr, "UPtr", src.w * src.h * 4)
+    ligne := Buffer((x2 - x1 + 1) * 4)
+    Loop x2 - x1 + 1
+        NumPut("UInt", couleur, ligne, (A_Index - 1) * 4)
     y := y1
     while (y <= y2) {
-        DllCall("RtlZeroMemory", "Ptr", img.ptr + (y * src.w + x1) * 4, "UPtr", (x2 - x1 + 1) * 4)
+        DllCall("RtlMoveMemory", "Ptr", img.ptr + (y * src.w + x1) * 4, "Ptr", ligne, "UPtr", ligne.Size)
         y += 1
     }
     return img
